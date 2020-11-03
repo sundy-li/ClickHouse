@@ -52,10 +52,7 @@ private:
     NamesAndTypesList partition_name_types;
     ExpressionActionsPtr minmax_idx_expr;
 
-
     Poco::Logger * log = &Poco::Logger::get("StorageHDFS");
-
-    void initPartitionKey();
 };
 }
 

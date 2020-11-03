@@ -76,7 +76,6 @@ namespace
 class HDFSSource : public SourceWithProgress
 {
 public:
-
     struct SourcesInfo
     {
         std::vector<String> uris;
@@ -331,7 +330,7 @@ Pipe StorageHDFS::read(
             WriteBufferFromOwnString wb;
 
             // consume the partition value from uri by regexp
-            // todo: integration with hive metastore
+            // TODO: integration with hive metastore
             for (size_t i = 0; i < names.size(); ++i)
             {
                 if (!RE2::FindAndConsume(&input, "/" + names[i] + "=([^/]+)", &tmp))
@@ -367,7 +366,7 @@ Pipe StorageHDFS::read(
 
             if (minmax_idx_condition->checkInHyperrectangle(ranges, partition_name_types.getTypes()).can_be_true)
             {
-                LOG_INFO(log, "matched partition: {}, hdfs file: {}", partition_name_types.toString(), s_uri);
+                LOG_INFO(log, "matched partition description: {}, hdfs file uri: {}", partition_name_types.toString(), s_uri);
                 sources_info->uris.push_back(s_uri);
                 sources_info->partition_fields.push_back(std::move(fields));
             }
