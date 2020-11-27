@@ -40,6 +40,7 @@ add_subdirectory (xz)
 
 add_subdirectory (poco-cmake)
 add_subdirectory (croaring-cmake)
+add_subdirectory (hive-metastore)
 
 
 # TODO: refactor the contrib libraries below this comment.

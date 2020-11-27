@@ -82,6 +82,11 @@ if (USE_ROCKSDB)
     add_headers_and_sources(dbms Storages/RocksDB)
 endif()
 
+if (USE_HDFS)
+    add_headers_and_sources(dbms Storages/Hive)
+endif()
+
+
 if (USE_AWS_S3)
     add_headers_and_sources(dbms Common/S3)
     add_headers_and_sources(dbms Disks/S3)
@@ -386,6 +391,13 @@ if (USE_HDFS)
     target_link_libraries (clickhouse_common_io PUBLIC ${HDFS3_LIBRARY})
     target_include_directories (clickhouse_common_io SYSTEM BEFORE PUBLIC ${HDFS3_INCLUDE_DIR})
 endif()
+
+
+if (USE_HDFS)
+    target_link_libraries (clickhouse_common_io PUBLIC ${HIVE_METASTORE_LIBRARY})
+    target_include_directories (clickhouse_common_io SYSTEM BEFORE PUBLIC ${HIVE_METASTORE_INCLUDE_DIR})
+endif()
+
 
 if (USE_AWS_S3)
     target_link_libraries (clickhouse_common_io PUBLIC ${AWS_S3_LIBRARY})
