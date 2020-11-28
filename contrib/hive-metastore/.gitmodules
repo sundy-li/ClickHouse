@@ -1,3 +1,0 @@
-[submodule "contrib/thrift"]
-	path = contrib/thrift
-	url = git@github.com:apache/thrift.git

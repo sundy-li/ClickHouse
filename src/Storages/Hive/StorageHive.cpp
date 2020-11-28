@@ -45,6 +45,7 @@ namespace ErrorCodes
 {
     extern const int NUMBER_OF_ARGUMENTS_DOESNT_MATCH;
     extern const int INVALID_PARTITION_VALUE;
+    extern const int FORMAT_IS_NOT_SUITABLE_FOR_INPUT;
 }
 
 StorageHive::StorageHive(const String & metastore_url_,
@@ -85,6 +86,10 @@ struct PartitonWithFile
 {
     FieldVector values;
     String file;
+    PartitonWithFile(const FieldVector & values_, const String & file_)
+    : values(values_)
+    , file(file_)
+    {}
 };
 
 using PartitonWithFiles = std::vector<PartitonWithFile>;
@@ -220,6 +225,21 @@ private:
 
 }
 
+static String convertHiveFormat(const String & hive_format)
+{
+    //currently only support Parquet, ORC
+    static std::unordered_map<String, String> format_map = {
+        {"org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe", "Parquet"},
+        {"org.apache.hadoop.hive.ql.io.orc.OrcSerde", "ORC"},
+    };
+
+    auto it = format_map.find(hive_format);
+    if (it == format_map.end())
+        throw Exception("Format " + hive_format + " is not suitable for input", ErrorCodes::FORMAT_IS_NOT_SUITABLE_FOR_INPUT);
+    return it->second;
+}
+
+
 Pipe StorageHive::read(
     const Names & column_names,
     const StorageMetadataPtr & metadata_snapshot,
@@ -241,12 +261,11 @@ Pipe StorageHive::read(
     Apache::Hadoop::Hive::ThriftHiveMetastoreClient client(protocol);
     transport->open();
 
-    Strings databases;
     Apache::Hadoop::Hive::Table table;
     std::vector<Apache::Hadoop::Hive::Partition> partitions;
     PartitonWithFiles partition_files;
 
-    auto * logger = &Poco::Logger::get("StorageHive");
+    // auto * logger = &Poco::Logger::get("StorageHive");
 
     client.get_table(table, hive_database, hive_table);
     String location = table.sd.location;
@@ -254,8 +273,25 @@ Pipe StorageHive::read(
     String uri_without_path = location.substr(0, begin_of_path);
     HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", context_.getSettingsRef().hdfs_namenode);
     HDFSFSPtr fs = createHDFSFS(builder.get());
+    FieldVector fields(partition_name_types.size());
 
-    HDFSFileInfo ls;
+    auto list_files = [&fs](const String & file_location)
+    {
+        Strings files;
+        Poco::URI location_uri(file_location);
+        HDFSFileInfo ls;
+        ls.file_info = hdfsListDirectory(fs.get(), location_uri.getPath().c_str(), &ls.length);
+        for (int i = 0; i < ls.length; ++i)
+        {
+            if (ls.file_info[i].mKind != 'D')
+            {
+                files.push_back(String(ls.file_info[i].mName));
+            }
+        }
+        return files;
+    };
+
+    // path for table with partition expr
     if (minmax_idx_expr)
     {
         client.get_partitions(partitions, hive_database, hive_table, -1);
@@ -269,7 +305,6 @@ Pipe StorageHive::read(
 
         for (const auto & p : partitions)
         {
-            std::vector<Field> fields(names.size());
             std::vector<Range> ranges;
             WriteBufferFromOwnString wb;
             if (p.values.size() != names.size())
@@ -280,8 +315,6 @@ Pipe StorageHive::read(
                 if (i != 0)
                     writeString(",", wb);
                 writeString(p.values[i], wb);
-
-                LOG_DEBUG(logger, "value -> {}", p.values[i]);
             }
             ReadBufferFromString buffer(wb.str());
             auto input_stream
@@ -290,7 +323,7 @@ Pipe StorageHive::read(
             auto block = input_stream->read();
             if (!block || !block.rows())
                 throw Exception(
-                    "Could not parse partition value: `",
+                    "Could not parse partition value: " + wb.str(),
                     ErrorCodes::INVALID_PARTITION_VALUE);
 
             for (size_t i = 0; i < names.size(); ++i)
@@ -302,28 +335,19 @@ Pipe StorageHive::read(
             if (!minmax_idx_condition->checkInHyperrectangle(ranges, partition_name_types.getTypes()).can_be_true)
                 continue;
 
-            Poco::URI location_uri(p.sd.location);
-            ls.file_info = hdfsListDirectory(fs.get(), location_uri.getPath().c_str(), &ls.length);
-
-            for (int i = 0; i < ls.length; ++i)
+            auto files = list_files(p.sd.location);
+            for (const auto & file : files)
             {
-                if (ls.file_info[i].mKind != 'D')
-                {
-                    partition_files.emplace_back(fields, String(ls.file_info[i].mName));
-                }
+                partition_files.emplace_back(fields, file);
             }
         }
     }
     else
     {
-        Poco::URI location_uri(table.sd.location);
-        ls.file_info = hdfsListDirectory(fs.get(), location_uri.getPath().c_str(), &ls.length);
-        for (int i = 0; i < ls.length; ++i)
+        auto files = list_files(table.sd.location);
+        for (const auto & file : files)
         {
-            if (ls.file_info[i].mKind != 'D')
-            {
-                partition_files.emplace_back(FieldVector(), String(ls.file_info[i].mName));
-            }
+            partition_files.emplace_back(fields, file);
         }
     }
 
@@ -346,7 +370,7 @@ Pipe StorageHive::read(
     Pipes pipes;
     for (size_t i = 0; i < num_streams; ++i)
         pipes.emplace_back(std::make_shared<HiveSource>(
-                sources_info, uri_without_path, "Parquet", "auto", metadata_snapshot->getSampleBlock(), context_, max_block_size));
+                sources_info, uri_without_path, convertHiveFormat(table.sd.serdeInfo.serializationLib), "auto", metadata_snapshot->getSampleBlock(), context_, max_block_size));
 
     return Pipe::unitePipes(std::move(pipes));
 }
