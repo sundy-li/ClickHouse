@@ -61,15 +61,17 @@ if(NOT THRIFT_LIBRARY OR NOT THRIFT_SOUCE_DIR)
         target_link_libraries (${THRIFT_LIBRARY} PRIVATE boost::headers_only)
 endif()
 
-# include_directories(${LIBRARY_DIR}/if/gen-cpp)
 # == hive_meta_store
+include_directories(${LIBRARY_DIR}/if/gen-cpp)
+include_directories(${LIBRARY_DIR}/src)
+
 set(meatstore_SOURCES
-        ${LIBRARY_DIR}/if/gen-cpp/FacebookService.cpp
+        ${LIBRARY_DIR}/src/metastore/HiveMetastoreCommon.cpp
         ${LIBRARY_DIR}/if/gen-cpp/fb303_constants.cpp
         ${LIBRARY_DIR}/if/gen-cpp/fb303_types.cpp
         ${LIBRARY_DIR}/if/gen-cpp/hive_metastore_constants.cpp
         ${LIBRARY_DIR}/if/gen-cpp/hive_metastore_types.cpp
-        ${LIBRARY_DIR}/if/gen-cpp/ThriftHiveMetastore.cpp)
-
+        ${LIBRARY_DIR}/if/gen-cpp/ThriftHiveMetastore.cpp
+)
 add_library(hive-metastore STATIC ${meatstore_SOURCES})
-target_link_libraries(hive-metastore PUBLIC thrift_mine)
+target_link_libraries(hive-metastore PUBLIC ${THRIFT_LIBRARY})

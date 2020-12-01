@@ -33,10 +33,7 @@
 #include <Processors/Pipe.h>
 #include <fmt/format.h>
 
-#include <thrift/transport/TSocket.h>
-#include <thrift/transport/TBufferTransports.h>
-#include <thrift/protocol/TBinaryProtocol.h>
-#include "ThriftHiveMetastore.h"
+#include <metastore/HiveMetastoreCommon.h>
 
 
 namespace DB
@@ -249,17 +246,9 @@ Pipe StorageHive::read(
     size_t max_block_size,
     unsigned num_streams)
 {
-    using namespace apache::thrift;
-    using namespace apache::thrift::protocol;
-    using namespace apache::thrift::transport;
-
     Poco::URI metastore_uri(metastore_url);
-    auto socket = std::make_shared<TSocket>(metastore_uri.getHost(), metastore_uri.getPort());
-    auto transport = std::make_shared<TBufferedTransport>(socket);
-    auto protocol = std::make_shared<TBinaryProtocol>(transport);
-
-    Apache::Hadoop::Hive::ThriftHiveMetastoreClient client(protocol);
-    transport->open();
+    HMSManager hsm_manager(metastore_uri.getHost(), metastore_uri.getPort());
+    auto & client = hsm_manager.getClient();
 
     Apache::Hadoop::Hive::Table table;
     std::vector<Apache::Hadoop::Hive::Partition> partitions;
@@ -283,7 +272,7 @@ Pipe StorageHive::read(
         ls.file_info = hdfsListDirectory(fs.get(), location_uri.getPath().c_str(), &ls.length);
         for (int i = 0; i < ls.length; ++i)
         {
-            if (ls.file_info[i].mKind != 'D')
+            if (ls.file_info[i].mKind != 'D' && ls.file_info[i].mSize > 0)
             {
                 files.push_back(String(ls.file_info[i].mName));
             }
