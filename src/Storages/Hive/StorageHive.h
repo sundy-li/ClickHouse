@@ -32,22 +32,21 @@ public:
     NamesAndTypesList getVirtuals() const override;
 
 protected:
-    StorageHive(const String & metastore_url_,
+    StorageHive(const StorageID & table_id_,
+        const String & metastore_url_,
         const String & hive_database_,
         const String & hive_table_,
-        const StorageID & table_id_,
         const ColumnsDescription & columns_,
         const ConstraintsDescription & constraints_,
         const ASTPtr & partition_by_ast_,
-        Context & context_);
+        const Context & context_);
 
 private:
     String metastore_url;
     String hive_database;
     String hive_table;
-    String format_name;
     const ASTPtr partition_by_ast;
-    Context & context;
+    const Context & context;
     ConnectionTimeouts timeouts;
     String compression_method;
 

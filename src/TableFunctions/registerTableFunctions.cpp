@@ -26,6 +26,7 @@ void registerTableFunctions()
 
 #if USE_HDFS
     registerTableFunctionHDFS(factory);
+    registerTableFunctionHIVE(factory);
 #endif
 
     registerTableFunctionODBC(factory);

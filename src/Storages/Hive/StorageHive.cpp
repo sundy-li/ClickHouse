@@ -45,14 +45,14 @@ namespace ErrorCodes
     extern const int FORMAT_IS_NOT_SUITABLE_FOR_INPUT;
 }
 
-StorageHive::StorageHive(const String & metastore_url_,
+StorageHive::StorageHive(const StorageID & table_id_,
+    const String & metastore_url_,
     const String & hive_database_,
     const String & hive_table_,
-    const StorageID & table_id_,
     const ColumnsDescription & columns_,
     const ConstraintsDescription & constraints_,
     const ASTPtr & partition_by_ast_,
-    Context & context_)
+    const Context & context_)
     : IStorage(table_id_)
     , metastore_url(metastore_url_)
     , hive_database(hive_database_)
@@ -401,7 +401,7 @@ void registerStorageHive(StorageFactory & factory)
         if (args.storage_def->partition_by)
             partition_by_ast = args.storage_def->partition_by->ptr();
 
-        return StorageHive::create(metastore_url, hive_database, hive_table, args.table_id, args.columns, args.constraints, partition_by_ast, args.context);
+        return StorageHive::create(args.table_id, metastore_url, hive_database, hive_table, args.columns, args.constraints, partition_by_ast, args.context);
     }, features);
 }
 
