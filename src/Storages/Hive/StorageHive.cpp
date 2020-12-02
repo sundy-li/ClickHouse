@@ -297,7 +297,8 @@ Pipe StorageHive::read(
             std::vector<Range> ranges;
             WriteBufferFromOwnString wb;
             if (p.values.size() != names.size())
-                throw Exception("Partition value size not match", ErrorCodes::INVALID_PARTITION_VALUE);
+                throw Exception(fmt::format("Partition value size not match, expect {}, but got {}", names.size(), p.values.size()),
+                    ErrorCodes::INVALID_PARTITION_VALUE);
 
             for (size_t i = 0; i < p.values.size(); ++i)
             {

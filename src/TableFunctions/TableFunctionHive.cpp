@@ -23,8 +23,6 @@
 #include <Parsers/ASTIdentifier.h>
 #include <Interpreters/evaluateConstantExpression.h>
 
-#include <common/logger_useful.h>
-
 #include <Poco/URI.h>
 #include <boost/algorithm/string.hpp>
 
@@ -74,8 +72,6 @@ ColumnsDescription TableFunctionHive::getActualTableStructure(const Context & /*
 
 StoragePtr TableFunctionHive::executeImpl(const ASTPtr & /*ast_function*/, const Context & context, const std::string & table_name, ColumnsDescription /*cached_columns*/) const
 {
-    auto logger = &Poco::Logger::get("TableFunctionHive");
-
     Poco::URI uri(metastore_url);
     auto manager = HMSManager(uri.getHost(), uri.getPort());
     auto & client = manager.getClient();
@@ -84,13 +80,12 @@ StoragePtr TableFunctionHive::executeImpl(const ASTPtr & /*ast_function*/, const
     auto columns = getActualTableStructure(context);
     if (!table.partitionKeys.empty())
     {
-        auto expr_list = std::make_shared<ASTExpressionList>();
+        ASTs children;
         for (const auto & c : table.partitionKeys)
         {
-            LOG_DEBUG(logger, "name --> {}", c.name);
-            expr_list->children.emplace_back(std::make_shared<ASTIdentifier>(c.name));
+            children.emplace_back(std::make_shared<ASTIdentifier>(c.name));
         }
-        partition_by_ast = std::move(expr_list);
+        partition_by_ast = makeASTFunction("tuple", children);
     }
 
     auto res = StorageHive::create(
