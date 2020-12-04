@@ -17,6 +17,9 @@ namespace DB
 class StorageHive final : public ext::shared_ptr_helper<StorageHive>, public IStorage
 {
     friend struct ext::shared_ptr_helper<StorageHive>;
+    friend class HiveBlockOutputStream;
+    friend class HiveBlockInputStream;
+
 public:
     String getName() const override { return "Hive"; }
 
@@ -45,6 +48,7 @@ private:
     String metastore_url;
     String hive_database;
     String hive_table;
+    String hdfs_location;
     const ASTPtr partition_by_ast;
     const Context & context;
     ConnectionTimeouts timeouts;
@@ -55,6 +59,9 @@ private:
 
     Poco::Logger * log = &Poco::Logger::get("StorageHive");
 };
+
+String convertHiveFormat(const String & hive_format);
+
 }
 
 #endif

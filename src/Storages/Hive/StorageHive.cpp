@@ -222,7 +222,7 @@ private:
 
 }
 
-static String convertHiveFormat(const String & hive_format)
+String convertHiveFormat(const String & hive_format)
 {
     //currently only support Parquet, ORC
     static std::unordered_map<String, String> format_map = {
