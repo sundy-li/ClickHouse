@@ -4,6 +4,7 @@
 
 #include <Storages/StorageFactory.h>
 #include <Storages/Hive/StorageHive.h>
+#include <Storages/Hive/HiveBlockOutputStream.h>
 #include <Storages/MergeTree/KeyCondition.h>
 #include <Storages/MergeTree/MergeTreeData.h>
 #include <Interpreters/Context.h>
@@ -365,6 +366,12 @@ Pipe StorageHive::read(
     return Pipe::unitePipes(std::move(pipes));
 }
 
+BlockOutputStreamPtr StorageHive::write(const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, const Context & /*context_*/)
+{
+    return std::make_shared<HiveBlockOutputStream>(*this, metadata_snapshot, context, context.getSettings().max_insert_block_size);
+}
+
+
 // Though partition cols is virtual column of hdfs storage
 // but we can consider it as material column in ClickHouse
 NamesAndTypesList StorageHive::getVirtuals() const
@@ -378,6 +385,7 @@ NamesAndTypesList StorageHive::getVirtuals() const
 void registerStorageHive(StorageFactory & factory)
 {
     StorageFactory::StorageFeatures features{
+        .supports_settings = true,
         .supports_sort_order = true,
         .source_access_type = AccessType::HDFS
     };
