@@ -96,20 +96,26 @@ void HiveBlockOutputStream::write(const Block & block)
         auto format = convertHiveFormat(table.sd.serdeInfo.serializationLib);
         auto writer = FormatFactory::instance().getOutput(format, *write_buf, metadata_snapshot->getSampleBlock(), context);
 
+        writer->writePrefix();
         writer->write(part_block.block);
+        writer->writeSuffix();
+        writer->flush();
 
-        Apache::Hadoop::Hive::Partition partition;
-        partition.dbName = storage.hive_database;
-        partition.tableName = storage.hive_table;
-        partition.sd = table.sd;
-        partition.sd.location = uri_without_path + location_dir;
-        partition.privileges = table.privileges;
-        for (const auto & p : part_block.partition)
+        if (!partition_exists)
         {
-            partition.values.push_back(toString(p));
+            Apache::Hadoop::Hive::Partition partition;
+            partition.dbName = storage.hive_database;
+            partition.tableName = storage.hive_table;
+            partition.sd = table.sd;
+            partition.sd.location = uri_without_path + location_dir;
+            partition.privileges = table.privileges;
+            for (const auto & p : part_block.partition)
+            {
+                partition.values.push_back(toString(p));
+            }
+            Apache::Hadoop::Hive::Partition dummpy;
+            client.add_partition(dummpy, partition);
         }
-        Apache::Hadoop::Hive::Partition dummpy;
-        client.add_partition(dummpy, partition);
     }
 }
 
