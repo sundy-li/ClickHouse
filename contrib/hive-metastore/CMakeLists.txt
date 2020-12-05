@@ -61,16 +61,28 @@ if(NOT THRIFT_LIBRARY OR NOT THRIFT_SOUCE_DIR)
 endif()
 
 # == hive_meta_store
-include_directories(${LIBRARY_DIR}/if/gen-cpp)
 
+## Version1
+# include_directories(${LIBRARY_DIR}/if/gen-cpp)
+# set(meatstore_SOURCES
+#         ${LIBRARY_DIR}/src/metastore/HiveMetastoreCommon.cpp
+#         ${LIBRARY_DIR}/if/gen-cpp/FacebookService.cpp
+#         ${LIBRARY_DIR}/if/gen-cpp/fb303_constants.cpp
+#         ${LIBRARY_DIR}/if/gen-cpp/fb303_types.cpp
+#         ${LIBRARY_DIR}/if/gen-cpp/hive_metastore_constants.cpp
+#         ${LIBRARY_DIR}/if/gen-cpp/hive_metastore_types.cpp
+#         ${LIBRARY_DIR}/if/gen-cpp/ThriftHiveMetastore.cpp
+# )
+
+## version2
+include_directories(${LIBRARY_DIR}/if2/gen-cpp)
 set(meatstore_SOURCES
         ${LIBRARY_DIR}/src/metastore/HiveMetastoreCommon.cpp
-        ${LIBRARY_DIR}/if/gen-cpp/FacebookService.cpp
-        ${LIBRARY_DIR}/if/gen-cpp/fb303_constants.cpp
-        ${LIBRARY_DIR}/if/gen-cpp/fb303_types.cpp
-        ${LIBRARY_DIR}/if/gen-cpp/hive_metastore_constants.cpp
-        ${LIBRARY_DIR}/if/gen-cpp/hive_metastore_types.cpp
-        ${LIBRARY_DIR}/if/gen-cpp/ThriftHiveMetastore.cpp
+        ${LIBRARY_DIR}/if2/gen-cpp/hive_metastore_constants.cpp
+        ${LIBRARY_DIR}/if2/gen-cpp/hive_metastore_types.cpp
+        ${LIBRARY_DIR}/if2/gen-cpp/ThriftHiveMetastore.cpp
 )
+
+
 add_library(hive-metastore STATIC ${meatstore_SOURCES})
 target_link_libraries(hive-metastore PUBLIC ${THRIFT_LIBRARY})
