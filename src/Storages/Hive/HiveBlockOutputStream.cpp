@@ -11,8 +11,10 @@
 #include <IO/HDFSCommon.h>
 #include <IO/WriteBufferFromHDFS.h>
 #include <Common/StringUtils/StringUtils.h>
+#include <Common/escapeForFileName.h>
 
 #include <common/logger_useful.h>
+#include <common/getFQDNOrHostName.h>
 
 #include <Poco/URI.h>
 #include <boost/algorithm/string.hpp>
@@ -63,11 +65,13 @@ void HiveBlockOutputStream::write(const Block & block)
     HDFSFSPtr fs = createHDFSFS(builder.get());
     String location_path = location.substr(begin_of_path);
 
+
     //split the block by partition keys
     auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(block, max_parts_per_block, metadata_snapshot);
     auto names = storage.partition_name_types.getNames();
-    for (auto & part_block : part_blocks)
+    for (size_t idx = 0; idx < part_blocks.size(); ++idx)
     {
+        auto & part_block = part_blocks[idx];
         String location_dir = location_path;
         boost::algorithm::trim_right_if(location_dir, [](const char & c) { return c == '/'; });
 
@@ -90,15 +94,19 @@ void HiveBlockOutputStream::write(const Block & block)
                 throw Exception("Can't create hdfs directory: " + location_dir + ": ", ErrorCodes::CANNOT_CREATE_DIRECTORY);
         }
 
-        String file = location_dir + "/" +  context.getClientInfo().current_query_id;
+        String file = fmt::format("{}/{}_{}_{}_{}",
+                                location_dir,
+                                escapeForFileName(getFQDNOrHostName()),
+                                context.getTCPPort(),
+                                context.getClientInfo().current_query_id,
+                                idx);
+
         auto write_buf = std::make_unique<WriteBufferFromHDFS>(uri_without_path + file, storage.hive_settings->hdfs_namenode.value);
 
         auto format = convertHiveFormat(table.sd.serdeInfo.serializationLib);
         auto writer = FormatFactory::instance().getOutput(format, *write_buf, metadata_snapshot->getSampleBlock(), context);
 
-        writer->writePrefix();
         writer->write(part_block.block);
-        writer->writeSuffix();
         writer->flush();
 
         if (!partition_exists)
