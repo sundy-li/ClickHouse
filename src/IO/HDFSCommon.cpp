@@ -12,11 +12,11 @@ extern const int BAD_ARGUMENTS;
 extern const int NETWORK_ERROR;
 }
 
-HDFSBuilderPtr createHDFSBuilder(const std::string & uri_str, const std::string & hdfs_namenode)
+HDFSBuilderPtr createHDFSBuilder(const std::string & uri_str)
 {
     const Poco::URI uri(uri_str);
     const auto & host = uri.getHost();
-    const std::string path = "//";
+    auto port = uri.getPort();
     if (host.empty())
         throw Exception("Illegal HDFS URI: " + uri.toString(), ErrorCodes::BAD_ARGUMENTS);
 
@@ -40,16 +40,10 @@ HDFSBuilderPtr createHDFSBuilder(const std::string & uri_str, const std::string 
 
         hdfsBuilderSetUserName(builder.get(), user.c_str());
     }
-
-    auto name_node_uri = uri;
-    if (!hdfs_namenode.empty())
+    hdfsBuilderSetNameNode(builder.get(), host.c_str());
+    if (port != 0)
     {
-        name_node_uri = Poco::URI(hdfs_namenode);
-    }
-    hdfsBuilderSetNameNode(builder.get(), name_node_uri.getHost().c_str());
-    if (name_node_uri.getPort() != 0)
-    {
-        hdfsBuilderSetNameNodePort(builder.get(), name_node_uri.getPort());
+        hdfsBuilderSetNameNodePort(builder.get(), port);
     }
     return builder;
 }

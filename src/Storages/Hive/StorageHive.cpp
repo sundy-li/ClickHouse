@@ -27,8 +27,6 @@
 #include <Common/parseGlobs.h>
 
 #include <Poco/URI.h>
-#include <re2/re2.h>
-#include <re2/stringpiece.h>
 #include <hdfs/hdfs.h>
 #include <Processors/Sources/SourceWithProgress.h>
 #include <Processors/Pipe.h>
@@ -122,19 +120,17 @@ public:
 
     HiveSource(
         SourcesInfoPtr source_info_,
-        String uri_,
+        String hdfs_namenode_url_,
         String format_,
         String compression_method_,
-        String hdfs_namenode_,
         Block sample_block_,
         const Context & context_,
         UInt64 max_block_size_)
         : SourceWithProgress(getHeader(sample_block_, source_info_))
         , source_info(std::move(source_info_))
-        , uri(uri_)
+        , hdfs_namenode_url(hdfs_namenode_url_)
         , format(std::move(format_))
         , compression_method(compression_method_)
-        , hdfs_namenode(hdfs_namenode_)
         , max_block_size(max_block_size_)
         , sample_block(std::move(sample_block_))
         , context(context_)
@@ -165,9 +161,9 @@ public:
 
                 current_path = source_info->partition_files[current_idx].file;
 
-                String uri_with_path = uri + current_path;
+                String uri_with_path = hdfs_namenode_url + current_path;
                 auto compression = chooseCompressionMethod(current_path, compression_method);
-                auto read_buf = wrapReadBufferWithCompressionMethod(std::make_unique<ReadBufferFromHDFS>(uri_with_path, hdfs_namenode), compression);
+                auto read_buf = wrapReadBufferWithCompressionMethod(std::make_unique<ReadBufferFromHDFS>(uri_with_path), compression);
                 auto input_stream = FormatFactory::instance().getInput(format, *read_buf, to_read_block, context, max_block_size);
 
                 reader = std::make_shared<OwningBlockInputStream<ReadBuffer>>(input_stream, std::move(read_buf));
@@ -213,10 +209,9 @@ public:
 private:
     BlockInputStreamPtr reader;
     SourcesInfoPtr source_info;
-    String uri;
+    String hdfs_namenode_url;
     String format;
     String compression_method;
-    String hdfs_namenode;
     UInt64 max_block_size;
     Block sample_block;
 
@@ -260,10 +255,14 @@ Pipe StorageHive::read(
     PartitonWithFiles partition_files;
 
     client.get_table(table, hive_database, hive_table);
-    String location = table.sd.location;
-    const size_t begin_of_path = location.find('/', location.find("//") + 2);
-    String uri_without_path = location.substr(0, begin_of_path);
-    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", hive_settings->hdfs_namenode.value);
+    String name_node_url = hive_settings->hdfs_namenode.value;
+    if (name_node_url.empty())
+        name_node_url = table.sd.location;
+
+    const size_t begin_of_path = name_node_url.find('/', name_node_url.find("//") + 2);
+    name_node_url = name_node_url.substr(0, begin_of_path) + "/";
+
+    HDFSBuilderPtr builder = createHDFSBuilder(name_node_url);
     HDFSFSPtr fs = createHDFSFS(builder.get());
     FieldVector fields(partition_name_types.size());
 
@@ -363,8 +362,8 @@ Pipe StorageHive::read(
     Pipes pipes;
     for (size_t i = 0; i < num_streams; ++i)
         pipes.emplace_back(std::make_shared<HiveSource>(
-                sources_info, uri_without_path, convertHiveFormat(table.sd.serdeInfo.serializationLib), "auto",
-                hive_settings->hdfs_namenode.value, metadata_snapshot->getSampleBlock(), context_, max_block_size));
+                sources_info, name_node_url, convertHiveFormat(table.sd.serdeInfo.serializationLib), "auto",
+                metadata_snapshot->getSampleBlock(), context_, max_block_size));
 
     return Pipe::unitePipes(std::move(pipes));
 }

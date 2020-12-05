@@ -147,7 +147,7 @@ public:
                 current_path = uri + path;
 
                 auto compression = chooseCompressionMethod(path, compression_method);
-                auto read_buf = wrapReadBufferWithCompressionMethod(std::make_unique<ReadBufferFromHDFS>(current_path, ""), compression);
+                auto read_buf = wrapReadBufferWithCompressionMethod(std::make_unique<ReadBufferFromHDFS>(current_path), compression);
                 auto input_stream = FormatFactory::instance().getInput(format, *read_buf, to_read_block, context, max_block_size);
 
                 reader = std::make_shared<OwningBlockInputStream<ReadBuffer>>(input_stream, std::move(read_buf));
@@ -309,7 +309,7 @@ Pipe StorageHDFS::read(
     const String uri_without_path = uri.substr(0, begin_of_path);
     const String path_from_uri = uri.substr(begin_of_path);
 
-    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", "");
+    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/");
     HDFSFSPtr fs = createHDFSFS(builder.get());
 
     auto sources_info = std::make_shared<HDFSSource::SourcesInfo>();

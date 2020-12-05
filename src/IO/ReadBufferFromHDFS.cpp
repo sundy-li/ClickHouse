@@ -26,12 +26,12 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl
     HDFSBuilderPtr builder;
     HDFSFSPtr fs;
 
-    explicit ReadBufferFromHDFSImpl(const std::string & hdfs_name_, const std::string & hdfs_namenode)
+    explicit ReadBufferFromHDFSImpl(const std::string & hdfs_name_)
         : hdfs_uri(hdfs_name_)
     {
         std::lock_guard lock(hdfs_init_mutex);
 
-        builder = createHDFSBuilder(hdfs_uri, hdfs_namenode);
+        builder = createHDFSBuilder(hdfs_uri);
         fs = createHDFSFS(builder.get());
         const size_t begin_of_path = hdfs_uri.find('/', hdfs_uri.find("//") + 2);
         const std::string path = hdfs_uri.substr(begin_of_path);
@@ -60,9 +60,9 @@ struct ReadBufferFromHDFS::ReadBufferFromHDFSImpl
 
 std::mutex ReadBufferFromHDFS::ReadBufferFromHDFSImpl::hdfs_init_mutex;
 
-ReadBufferFromHDFS::ReadBufferFromHDFS(const std::string & hdfs_name_, const std::string & hdfs_namenode, size_t buf_size)
+ReadBufferFromHDFS::ReadBufferFromHDFS(const std::string & hdfs_name_, size_t buf_size)
     : BufferWithOwnMemory<ReadBuffer>(buf_size)
-    , impl(std::make_unique<ReadBufferFromHDFSImpl>(hdfs_name_, hdfs_namenode))
+    , impl(std::make_unique<ReadBufferFromHDFSImpl>(hdfs_name_))
 {
 }
 

@@ -17,8 +17,8 @@
 #include <common/getFQDNOrHostName.h>
 
 #include <Poco/URI.h>
-#include <boost/algorithm/string.hpp>
 #include <hdfs/hdfs.h>
+#include <boost/algorithm/string.hpp>
 
 #include <metastore/HiveMetastoreCommon.h>
 
@@ -58,13 +58,20 @@ void HiveBlockOutputStream::write(const Block & block)
     Apache::Hadoop::Hive::Table table;
     client.get_table(table, storage.hive_database, storage.hive_table);
 
-    String location = table.sd.location;
-    const size_t begin_of_path = location.find('/', location.find("//") + 2);
-    String uri_without_path = location.substr(0, begin_of_path);
-    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", storage.hive_settings->hdfs_namenode.value);
-    HDFSFSPtr fs = createHDFSFS(builder.get());
-    String location_path = location.substr(begin_of_path);
+    size_t begin_of_path = table.sd.location.find('/', table.sd.location.find("//") + 2);
+    String uri_without_path = table.sd.location.substr(0, begin_of_path) + "/";
+    String location_path = table.sd.location.substr(begin_of_path);
 
+    String name_node_url = uri_without_path;
+    if (!storage.hive_settings->hdfs_namenode.value.empty())
+    {
+        name_node_url = storage.hive_settings->hdfs_namenode.value;
+        boost::algorithm::trim_right_if(name_node_url, [](const char & c) { return c == '/'; });
+        name_node_url += "/";
+    }
+
+    HDFSBuilderPtr builder = createHDFSBuilder(name_node_url);
+    HDFSFSPtr fs = createHDFSFS(builder.get());
 
     //split the block by partition keys
     auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(block, max_parts_per_block, metadata_snapshot);
@@ -101,7 +108,7 @@ void HiveBlockOutputStream::write(const Block & block)
                                 context.getClientInfo().current_query_id,
                                 idx);
 
-        auto write_buf = std::make_unique<WriteBufferFromHDFS>(uri_without_path + file, storage.hive_settings->hdfs_namenode.value);
+        auto write_buf = std::make_unique<WriteBufferFromHDFS>(name_node_url + file, storage.hive_settings->hdfs_namenode.value);
 
         auto format = convertHiveFormat(table.sd.serdeInfo.serializationLib);
         auto writer = FormatFactory::instance().getOutput(format, *write_buf, metadata_snapshot->getSampleBlock(), context);

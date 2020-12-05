@@ -28,7 +28,7 @@ struct WriteBufferFromHDFS::WriteBufferFromHDFSImpl
 
     explicit WriteBufferFromHDFSImpl(const std::string & hdfs_name_, const std::string & hdfs_namenode)
         : hdfs_uri(hdfs_name_)
-        , builder(createHDFSBuilder(hdfs_uri, hdfs_namenode))
+        , builder(createHDFSBuilder(hdfs_namenode.empty()? hdfs_uri : hdfs_namenode))
         , fs(createHDFSFS(builder.get()))
     {
         const size_t begin_of_path = hdfs_uri.find('/', hdfs_uri.find("//") + 2);
