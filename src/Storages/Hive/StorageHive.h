@@ -3,6 +3,7 @@
 #if USE_HDFS
 
 #include <Storages/IStorage.h>
+#include <Storages/Hive/HiveSettings.h>
 #include <Poco/URI.h>
 #include <IO/ConnectionTimeouts.h>
 #include <common/logger_useful.h>
@@ -42,6 +43,7 @@ protected:
         const String & hive_database_,
         const String & hive_table_,
         const ColumnsDescription & columns_,
+        std::unique_ptr<HiveSettings> hive_settings_,
         const ConstraintsDescription & constraints_,
         const ASTPtr & partition_by_ast_,
         const Context & context_);
@@ -50,11 +52,10 @@ private:
     String metastore_url;
     String hive_database;
     String hive_table;
-    String hdfs_location;
+    std::unique_ptr<HiveSettings> hive_settings;
     const ASTPtr partition_by_ast;
     const Context & context;
     ConnectionTimeouts timeouts;
-    String compression_method;
 
     NamesAndTypesList partition_name_types;
     ExpressionActionsPtr minmax_idx_expr;

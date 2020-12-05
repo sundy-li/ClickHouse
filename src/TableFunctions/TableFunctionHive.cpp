@@ -57,6 +57,11 @@ void TableFunctionHive::parseArguments(const ASTPtr & ast_function, const Contex
 
 ColumnsDescription TableFunctionHive::getActualTableStructure(const Context & /*context*/) const
 {
+    Poco::URI uri(metastore_url);
+    auto manager = HMSManager(uri.getHost(), uri.getPort());
+    auto & client = manager.getClient();
+    client.get_table(table, hive_database, hive_table);
+
     ColumnsDescription res;
     for (const auto & col : table.sd.cols)
     {
@@ -72,11 +77,6 @@ ColumnsDescription TableFunctionHive::getActualTableStructure(const Context & /*
 
 StoragePtr TableFunctionHive::executeImpl(const ASTPtr & /*ast_function*/, const Context & context, const std::string & table_name, ColumnsDescription /*cached_columns*/) const
 {
-    Poco::URI uri(metastore_url);
-    auto manager = HMSManager(uri.getHost(), uri.getPort());
-    auto & client = manager.getClient();
-    client.get_table(table, hive_database, hive_table);
-
     auto columns = getActualTableStructure(context);
     if (!table.partitionKeys.empty())
     {
@@ -88,12 +88,14 @@ StoragePtr TableFunctionHive::executeImpl(const ASTPtr & /*ast_function*/, const
         partition_by_ast = makeASTFunction("tuple", children);
     }
 
+    auto hive_settings = std::make_unique<HiveSettings>();
     auto res = StorageHive::create(
         StorageID(getDatabaseName(), table_name),
         metastore_url,
         hive_database,
         hive_table,
         columns,
+        std::move(hive_settings),
         ConstraintsDescription{},
         partition_by_ast,
         context);

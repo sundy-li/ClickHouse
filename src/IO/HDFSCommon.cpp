@@ -46,7 +46,6 @@ HDFSBuilderPtr createHDFSBuilder(const std::string & uri_str, const std::string 
     {
         name_node_uri = Poco::URI(hdfs_namenode);
     }
-
     hdfsBuilderSetNameNode(builder.get(), name_node_uri.getHost().c_str());
     if (name_node_uri.getPort() != 0)
     {

@@ -10,8 +10,9 @@
 #include <IO/CompressionMethod.h>
 #include <IO/HDFSCommon.h>
 #include <IO/WriteBufferFromHDFS.h>
-#include <Common/CurrentThread.h>
 #include <Common/StringUtils/StringUtils.h>
+
+#include <common/logger_useful.h>
 
 #include <Poco/URI.h>
 #include <boost/algorithm/string.hpp>
@@ -58,15 +59,16 @@ void HiveBlockOutputStream::write(const Block & block)
     String location = table.sd.location;
     const size_t begin_of_path = location.find('/', location.find("//") + 2);
     String uri_without_path = location.substr(0, begin_of_path);
-    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", context.getSettingsRef().hdfs_namenode);
+    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", storage.hive_settings->hdfs_namenode.value);
     HDFSFSPtr fs = createHDFSFS(builder.get());
+    String location_path = location.substr(begin_of_path);
 
     //split the block by partition keys
     auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(block, max_parts_per_block, metadata_snapshot);
     auto names = storage.partition_name_types.getNames();
     for (auto & part_block : part_blocks)
     {
-        String location_dir = table.sd.location;
+        String location_dir = location_path;
         boost::algorithm::trim_right_if(location_dir, [](const char & c) { return c == '/'; });
 
         if (names.size() != part_block.partition.size())
@@ -80,34 +82,34 @@ void HiveBlockOutputStream::write(const Block & block)
 
         auto info = hdfsGetPathInfo(fs.get(), location_dir.c_str());
         auto partition_exists = info && info->mKind == 'D';
+
         if (!partition_exists)
         {
             auto res = hdfsCreateDirectory(fs.get(), location_dir.c_str());
             if (res < 0)
-                throw Exception("Can't create hdfs directory.", ErrorCodes::CANNOT_CREATE_DIRECTORY);
+                throw Exception("Can't create hdfs directory: " + location_dir + ": ", ErrorCodes::CANNOT_CREATE_DIRECTORY);
         }
 
-        String file = location_dir + "/" + context.getClientInfo().current_query_id;
-        auto write_buf = wrapWriteBufferWithCompressionMethod(std::make_unique<WriteBufferFromHDFS>(file, context.getSettingsRef().hdfs_namenode), CompressionMethod::None, 3);
+        String file = location_dir + "/" +  context.getClientInfo().current_query_id;
+        auto write_buf = std::make_unique<WriteBufferFromHDFS>(uri_without_path + file, storage.hive_settings->hdfs_namenode.value);
 
         auto format = convertHiveFormat(table.sd.serdeInfo.serializationLib);
         auto writer = FormatFactory::instance().getOutput(format, *write_buf, metadata_snapshot->getSampleBlock(), context);
 
         writer->write(part_block.block);
 
-        if (!partition_exists)
+        Apache::Hadoop::Hive::Partition partition;
+        partition.dbName = storage.hive_database;
+        partition.tableName = storage.hive_table;
+        partition.sd = table.sd;
+        partition.sd.location = uri_without_path + location_dir;
+        partition.privileges = table.privileges;
+        for (const auto & p : part_block.partition)
         {
-            Apache::Hadoop::Hive::Partition partition;
-            partition.dbName = storage.hive_database;
-            partition.tableName = storage.hive_table;
-            partition.sd = table.sd;
-            partition.privileges = table.privileges;
-            for (const auto & p : part_block.partition)
-            {
-                partition.values.push_back(toString(p));
-            }
-            client.add_partition(partition, partition);
+            partition.values.push_back(toString(p));
         }
+        Apache::Hadoop::Hive::Partition dummpy;
+        client.add_partition(dummpy, partition);
     }
 }
 

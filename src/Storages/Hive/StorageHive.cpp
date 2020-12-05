@@ -51,6 +51,7 @@ StorageHive::StorageHive(const StorageID & table_id_,
     const String & hive_database_,
     const String & hive_table_,
     const ColumnsDescription & columns_,
+    std::unique_ptr<HiveSettings> hive_settings_,
     const ConstraintsDescription & constraints_,
     const ASTPtr & partition_by_ast_,
     const Context & context_)
@@ -58,6 +59,7 @@ StorageHive::StorageHive(const StorageID & table_id_,
     , metastore_url(metastore_url_)
     , hive_database(hive_database_)
     , hive_table(hive_table_)
+    , hive_settings(std::move(hive_settings_))
     , partition_by_ast(partition_by_ast_)
     , context(context_)
     , timeouts{ConnectionTimeouts::getHTTPTimeouts(context)}
@@ -123,6 +125,7 @@ public:
         String uri_,
         String format_,
         String compression_method_,
+        String hdfs_namenode_,
         Block sample_block_,
         const Context & context_,
         UInt64 max_block_size_)
@@ -131,6 +134,7 @@ public:
         , uri(uri_)
         , format(std::move(format_))
         , compression_method(compression_method_)
+        , hdfs_namenode(hdfs_namenode_)
         , max_block_size(max_block_size_)
         , sample_block(std::move(sample_block_))
         , context(context_)
@@ -163,7 +167,7 @@ public:
 
                 String uri_with_path = uri + current_path;
                 auto compression = chooseCompressionMethod(current_path, compression_method);
-                auto read_buf = wrapReadBufferWithCompressionMethod(std::make_unique<ReadBufferFromHDFS>(uri_with_path, context.getSettingsRef().hdfs_namenode), compression);
+                auto read_buf = wrapReadBufferWithCompressionMethod(std::make_unique<ReadBufferFromHDFS>(uri_with_path, hdfs_namenode), compression);
                 auto input_stream = FormatFactory::instance().getInput(format, *read_buf, to_read_block, context, max_block_size);
 
                 reader = std::make_shared<OwningBlockInputStream<ReadBuffer>>(input_stream, std::move(read_buf));
@@ -212,12 +216,12 @@ private:
     String uri;
     String format;
     String compression_method;
-    String current_path;
-    size_t current_idx = 0;
-
+    String hdfs_namenode;
     UInt64 max_block_size;
     Block sample_block;
 
+    String current_path;
+    size_t current_idx = 0;
     const Context & context;
 };
 
@@ -255,13 +259,11 @@ Pipe StorageHive::read(
     std::vector<Apache::Hadoop::Hive::Partition> partitions;
     PartitonWithFiles partition_files;
 
-    // auto * logger = &Poco::Logger::get("StorageHive");
-
     client.get_table(table, hive_database, hive_table);
     String location = table.sd.location;
     const size_t begin_of_path = location.find('/', location.find("//") + 2);
     String uri_without_path = location.substr(0, begin_of_path);
-    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", context_.getSettingsRef().hdfs_namenode);
+    HDFSBuilderPtr builder = createHDFSBuilder(uri_without_path + "/", hive_settings->hdfs_namenode.value);
     HDFSFSPtr fs = createHDFSFS(builder.get());
     FieldVector fields(partition_name_types.size());
 
@@ -361,14 +363,15 @@ Pipe StorageHive::read(
     Pipes pipes;
     for (size_t i = 0; i < num_streams; ++i)
         pipes.emplace_back(std::make_shared<HiveSource>(
-                sources_info, uri_without_path, convertHiveFormat(table.sd.serdeInfo.serializationLib), "auto", metadata_snapshot->getSampleBlock(), context_, max_block_size));
+                sources_info, uri_without_path, convertHiveFormat(table.sd.serdeInfo.serializationLib), "auto",
+                hive_settings->hdfs_namenode.value, metadata_snapshot->getSampleBlock(), context_, max_block_size));
 
     return Pipe::unitePipes(std::move(pipes));
 }
 
-BlockOutputStreamPtr StorageHive::write(const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, const Context & /*context_*/)
+BlockOutputStreamPtr StorageHive::write(const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, const Context & context_)
 {
-    return std::make_shared<HiveBlockOutputStream>(*this, metadata_snapshot, context, context.getSettings().max_insert_block_size);
+    return std::make_shared<HiveBlockOutputStream>(*this, metadata_snapshot, context_, context.getSettings().max_insert_block_size);
 }
 
 
@@ -406,11 +409,19 @@ void registerStorageHive(StorageFactory & factory)
         String hive_database = engine_args[1]->as<ASTLiteral &>().value.safeGet<String>();
         String hive_table = engine_args[2]->as<ASTLiteral &>().value.safeGet<String>();
 
+        bool has_settings = args.storage_def->settings;
+        auto hive_settings = std::make_unique<HiveSettings>();
+        if (has_settings)
+        {
+            hive_settings->loadFromQuery(*args.storage_def);
+        }
+
+
         ASTPtr partition_by_ast;
         if (args.storage_def->partition_by)
             partition_by_ast = args.storage_def->partition_by->ptr();
 
-        return StorageHive::create(args.table_id, metastore_url, hive_database, hive_table, args.columns, args.constraints, partition_by_ast, args.context);
+        return StorageHive::create(args.table_id, metastore_url, hive_database, hive_table, args.columns, (std::move(hive_settings)), args.constraints, partition_by_ast, args.context);
     }, features);
 }
 
