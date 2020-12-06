@@ -255,12 +255,7 @@ Pipe StorageHive::read(
     PartitonWithFiles partition_files;
 
     client.get_table(table, hive_database, hive_table);
-    String name_node_url = hive_settings->hdfs_namenode.value;
-    if (name_node_url.empty())
-        name_node_url = table.sd.location;
-
-    const size_t begin_of_path = name_node_url.find('/', name_node_url.find("//") + 2);
-    name_node_url = name_node_url.substr(0, begin_of_path) + "/";
+    String name_node_url = getNameNodeUrl(table.sd.location);
 
     HDFSBuilderPtr builder = createHDFSBuilder(name_node_url);
     HDFSFSPtr fs = createHDFSFS(builder.get());
@@ -384,6 +379,19 @@ NamesAndTypesList StorageHive::getVirtuals() const
     };
 }
 
+// apply hive_settings->hdfs_namenode.value to replace name node url.
+String StorageHive::getNameNodeUrl(const String & hdfs_url) const
+{
+    String name_node_url = hive_settings->hdfs_namenode.value;
+    if (name_node_url.empty())
+        name_node_url = hdfs_url;
+
+    const size_t begin_of_path = name_node_url.find('/', name_node_url.find("//") + 2);
+    name_node_url = name_node_url.substr(0, begin_of_path) + "/";
+    return name_node_url;
+}
+
+
 void registerStorageHive(StorageFactory & factory)
 {
     StorageFactory::StorageFeatures features{
@@ -414,7 +422,6 @@ void registerStorageHive(StorageFactory & factory)
         {
             hive_settings->loadFromQuery(*args.storage_def);
         }
-
 
         ASTPtr partition_by_ast;
         if (args.storage_def->partition_by)

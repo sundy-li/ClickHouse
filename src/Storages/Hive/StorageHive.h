@@ -37,6 +37,8 @@ public:
     BlockOutputStreamPtr write(const ASTPtr & /*query*/, const StorageMetadataPtr & metadata_snapshot, const Context & /*context_*/) override;
     NamesAndTypesList getVirtuals() const override;
 
+    String getNameNodeUrl(const String & hdfs_url_) const;
+
 protected:
     StorageHive(const StorageID & table_id_,
         const String & metastore_url_,

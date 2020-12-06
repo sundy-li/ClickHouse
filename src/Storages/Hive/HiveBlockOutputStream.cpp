@@ -62,14 +62,7 @@ void HiveBlockOutputStream::write(const Block & block)
     String uri_without_path = table.sd.location.substr(0, begin_of_path) + "/";
     String location_path = table.sd.location.substr(begin_of_path);
 
-    String name_node_url = uri_without_path;
-    if (!storage.hive_settings->hdfs_namenode.value.empty())
-    {
-        name_node_url = storage.hive_settings->hdfs_namenode.value;
-        boost::algorithm::trim_right_if(name_node_url, [](const char & c) { return c == '/'; });
-        name_node_url += "/";
-    }
-
+    String name_node_url = storage.getNameNodeUrl(table.sd.location);
     HDFSBuilderPtr builder = createHDFSBuilder(name_node_url);
     HDFSFSPtr fs = createHDFSFS(builder.get());
 
