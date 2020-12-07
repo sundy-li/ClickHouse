@@ -2,44 +2,44 @@
 
 #if USE_HDFS
 
-#include <Storages/Hive/HiveBlockOutputStream.h>
-#include <Storages/Hive/StorageHive.h>
-#include <Storages/MergeTree/MergeTreeDataWriter.h>
-#include <Formats/FormatFactory.h>
-#include <IO/WriteBufferFromString.h>
-#include <IO/CompressionMethod.h>
-#include <IO/HDFSCommon.h>
-#include <IO/WriteBufferFromHDFS.h>
-#include <Common/StringUtils/StringUtils.h>
-#include <Common/escapeForFileName.h>
-
-#include <common/logger_useful.h>
-#include <common/getFQDNOrHostName.h>
-
-#include <Poco/URI.h>
-#include <hdfs/hdfs.h>
-#include <boost/algorithm/string.hpp>
-
-#include <metastore/HiveMetastoreCommon.h>
+#    include <DataStreams/materializeBlock.h>
+#    include <Formats/FormatFactory.h>
+#    include <IO/CompressionMethod.h>
+#    include <IO/WriteBufferFromHDFS.h>
+#    include <IO/WriteBufferFromString.h>
+#    include <Storages/Hive/HiveBlockOutputStream.h>
+#    include <Storages/Hive/StorageHive.h>
+#    include <Storages/MergeTree/MergeTreeDataWriter.h>
+#    include <boost/algorithm/string.hpp>
+#    include <hdfs/hdfs.h>
+#    include <metastore/HiveMetastoreCommon.h>
+#    include <Poco/URI.h>
+#    include <Common/StringUtils/StringUtils.h>
+#    include <Common/escapeForFileName.h>
+#    include <common/getFQDNOrHostName.h>
+#    include <common/logger_useful.h>
 
 namespace DB
 {
-
 namespace ErrorCodes
 {
     extern const int INVALID_PARTITION_VALUE;
     extern const int CANNOT_CREATE_DIRECTORY;
+    extern const int NETWORK_ERROR;
 }
 
 HiveBlockOutputStream::HiveBlockOutputStream(
     StorageHive & storage_,
     const StorageMetadataPtr & metadata_snapshot_,
     const Context & context_,
-    const size_t & max_parts_per_block_)
+    size_t max_parts_per_block_,
+    size_t concurrency_)
     : storage(storage_)
     , metadata_snapshot(metadata_snapshot_)
     , context(context_)
     , max_parts_per_block(max_parts_per_block_)
+    , pool(concurrency_)
+    , concurrency(concurrency_)
 {
 }
 
@@ -48,25 +48,47 @@ Block HiveBlockOutputStream::getHeader() const
     return metadata_snapshot->getSampleBlock();
 }
 
+void HiveBlockOutputStream::writePrefix()
+{
+}
+
 void HiveBlockOutputStream::write(const Block & block)
 {
-    metadata_snapshot->check(block, true);
-    Poco::URI metastore_uri(storage.metastore_url);
-    HMSManager hsm_manager(metastore_uri.getHost(), metastore_uri.getPort());
+    if (!init)
+    {
+        Poco::URI metastore_uri(storage.metastore_url);
+        HMSManager hms_manager(metastore_uri.getHost(), metastore_uri.getPort());
+        auto & client = hsm_manager.getClient();
+        Apache::Hadoop::Hive::Table table;
+        client.get_table(table, storage.hive_database, storage.hive_table);
 
-    auto & client = hsm_manager.getClient();
-    Apache::Hadoop::Hive::Table table;
-    client.get_table(table, storage.hive_database, storage.hive_table);
+        size_t begin_of_path = table.sd.location.find('/', table.sd.location.find("//") + 2);
+        String uri_without_path = table.sd.location.substr(0, begin_of_path) + "/";
+        location_path = table.sd.location.substr(begin_of_path);
+        name_node_url = storage.getNameNodeUrl(table.sd.location);
+        format = convertHiveFormat(table.sd.serdeInfo.serializationLib);
+        thread_id = getThreadId();
+        init = true;
+    }
+    if (block)
+    {
+        metadata_snapshot->check(block, true);
+        if (concurrency > 1)
+            pool.scheduleOrThrowOnError([this, block]() { sendBlock(block); });
+        else
+            sendBlock(block);
+    }
+}
 
-    size_t begin_of_path = table.sd.location.find('/', table.sd.location.find("//") + 2);
-    String uri_without_path = table.sd.location.substr(0, begin_of_path) + "/";
-    String location_path = table.sd.location.substr(begin_of_path);
+void HiveBlockOutputStream::writeSuffix()
+{
+    pool.wait();
+}
 
-    String name_node_url = storage.getNameNodeUrl(table.sd.location);
+void HiveBlockOutputStream::sendBlock(const Block & block)
+{
     HDFSBuilderPtr builder = createHDFSBuilder(name_node_url);
     HDFSFSPtr fs = createHDFSFS(builder.get());
-
-    //split the block by partition keys
     auto part_blocks = MergeTreeDataWriter::splitBlockIntoParts(block, max_parts_per_block, metadata_snapshot);
     auto names = storage.partition_name_types.getNames();
     for (size_t idx = 0; idx < part_blocks.size(); ++idx)
@@ -94,36 +116,65 @@ void HiveBlockOutputStream::write(const Block & block)
                 throw Exception("Can't create hdfs directory: " + location_dir + ": ", ErrorCodes::CANNOT_CREATE_DIRECTORY);
         }
 
-        String file = fmt::format("{}/{}_{}_{}_{}",
-                                location_dir,
-                                escapeForFileName(getFQDNOrHostName()),
-                                context.getTCPPort(),
-                                context.getClientInfo().current_query_id,
-                                idx);
+        String file = fmt::format(
+            "{}/{}_{}_{}_{}_{}",
+            location_dir,
+            escapeForFileName(getFQDNOrHostName()),
+            context.getTCPPort(),
+            context.getClientInfo().current_query_id,
+            thread_id,
+            cur++);
 
-        auto write_buf = std::make_unique<WriteBufferFromHDFS>(name_node_url + file, storage.hive_settings->hdfs_namenode.value);
-
-        auto format = convertHiveFormat(table.sd.serdeInfo.serializationLib);
-        auto writer = FormatFactory::instance().getOutput(format, *write_buf, metadata_snapshot->getSampleBlock(), context);
-
-        writer->write(part_block.block);
-        writer->flush();
-
-        if (!partition_exists)
+        std::unique_ptr<WriteBufferFromHDFS> write_buf;
+        BlockOutputStreamPtr writer;
+        uint64_t milliseconds_to_wait = 1; /// Exponential backoff
+        for (size_t retry = 0; retry < 30; ++retry)
         {
-            Apache::Hadoop::Hive::Partition partition;
-            partition.dbName = storage.hive_database;
-            partition.tableName = storage.hive_table;
-            partition.sd = table.sd;
-            partition.sd.location = uri_without_path + location_dir;
-            partition.privileges = table.privileges;
-            for (const auto & p : part_block.partition)
+            try
             {
-                partition.values.push_back(toString(p));
+                write_buf = std::make_unique<WriteBufferFromHDFS>(name_node_url + file, storage.hive_settings->hdfs_namenode.value);
+                writer = FormatFactory::instance().getOutput(format, *write_buf, metadata_snapshot->getSampleBlock(), context);
             }
-            Apache::Hadoop::Hive::Partition dummpy;
-            client.add_partition(dummpy, partition);
+            catch (const Exception & e)
+            {
+                /// Retry when the server said "Client should retry".
+                if (e.code() != ErrorCodes::NETWORK_ERROR || retry == 29)
+                    throw;
+                try
+                {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds_to_wait));
+                }
+                catch (...)
+                {
+                }
+                milliseconds_to_wait *= 2;
+                milliseconds_to_wait = std::min(1000ul, milliseconds_to_wait);
+            }
+            catch (...)
+            {
+                throw;
+            }
+            break;
         }
+        writer->writePrefix();
+        writer->write(part_block.block);
+        writer->writeSuffix();
+
+        // if (!partition_exists)
+        // {
+        //     Apache::Hadoop::Hive::Partition partition;
+        //     partition.dbName = storage.hive_database;
+        //     partition.tableName = storage.hive_table;
+        //     partition.sd = table.sd;
+        //     partition.sd.location = uri_without_path + location_dir;
+        //     partition.privileges = table.privileges;
+        //     for (const auto & p : part_block.partition)
+        //     {
+        //         partition.values.push_back(toString(p));
+        //     }
+        //     Apache::Hadoop::Hive::Partition dummpy;
+        //     client.add_partition(dummpy, partition);
+        // }
     }
 }
 
