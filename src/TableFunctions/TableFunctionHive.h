@@ -4,22 +4,21 @@
 #endif
 
 #if USE_HDFS
-#include <DataTypes/IDataType.h>
-#include <TableFunctions/ITableFunction.h>
-#include <metastore/HiveMetastoreCommon.h>
+#    include <DataTypes/IDataType.h>
+#    include <TableFunctions/ITableFunction.h>
+#    include <metastore/HiveMetastoreCommon.h>
 
-#include <unordered_map>
+#    include <unordered_map>
 
 
 namespace Apache::Hadoop::Hive
 {
-    class Table;
+class Table;
 }
 
 namespace DB
 {
-
-/* hive ('metastore_url', 'hive_database', 'hive_table') - creates a temporary StorageHive.
+/* hive ('metastore_uri', 'hive_database', 'hive_table', 'hdfs_uri') - creates a temporary StorageHive.
  * The structure of the table is taken from the mysql query DESCRIBE table.
  * If there is no such table, an exception is thrown.
  */
@@ -32,7 +31,9 @@ public:
     std::string getName() const override { return name; }
 
 private:
-    StoragePtr executeImpl(const ASTPtr & ast_function, const Context & context, const std::string & table_name, ColumnsDescription cached_columns) const override;
+    StoragePtr
+    executeImpl(const ASTPtr & ast_function, const Context & context, const std::string & table_name, ColumnsDescription cached_columns)
+        const override;
     const char * getStorageTypeName() const override { return "Hive"; }
 
     ColumnsDescription getActualTableStructure(const Context & context) const override;
@@ -40,9 +41,10 @@ private:
 
     DataTypePtr convertHiveDataType(const String & type_name, bool is_null) const;
 
-    String metastore_url;
+    String metastore_uri;
     String hive_database;
     String hive_table;
+    String hdfs_uri;
 
     mutable ASTPtr partition_by_ast;
     mutable Apache::Hadoop::Hive::Table table;

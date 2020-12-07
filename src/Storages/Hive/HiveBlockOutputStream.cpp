@@ -58,7 +58,7 @@ void HiveBlockOutputStream::write(const Block & block)
     {
         Poco::URI metastore_uri(storage.metastore_url);
         HMSManager hms_manager(metastore_uri.getHost(), metastore_uri.getPort());
-        auto & client = hsm_manager.getClient();
+        auto & client = hms_manager.getClient();
         Apache::Hadoop::Hive::Table table;
         client.get_table(table, storage.hive_database, storage.hive_table);
 
@@ -149,6 +149,7 @@ void HiveBlockOutputStream::sendBlock(const Block & block)
                 }
                 milliseconds_to_wait *= 2;
                 milliseconds_to_wait = std::min(1000ul, milliseconds_to_wait);
+                continue;
             }
             catch (...)
             {
